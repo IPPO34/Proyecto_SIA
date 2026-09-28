@@ -1,0 +1,890 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#111418" media="(prefers-color-scheme: dark)" />
+    <title>
+      Monitoreo de eventos
+    </title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+    <style>
+      :root {
+    --fondo: #f3f5f8; --superficie: #ffffff; --superficie-2: #f7f8fa;
+    --texto: #151a23; --suave: #5f6878; --tenue: #8a93a3; --borde: #e3e7ee;
+    --acento: #1a7f55; --acento-suave: #e6f4ee;
+    --alerta: #c2362b; --alerta-suave: #fdecea;
+    --aviso: #b26a00; --aviso-suave: #fff4e0;
+    --sombra: 0 1px 2px rgba(16,24,40,.05), 0 1px 3px rgba(16,24,40,.06);
+    --sombra-alta: 0 10px 30px rgba(16,24,40,.16);
+    --radio: 12px;
+    --mapa-filtro: grayscale(.55) contrast(.95) brightness(1.03);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --fondo: #0d1014; --superficie: #151a21; --superficie-2: #1b212a;
+      --texto: #e8ebf0; --suave: #a3acbb; --tenue: #717b8c; --borde: #262d38;
+      --acento: #45c48b; --acento-suave: #133226;
+      --alerta: #ff6f63; --alerta-suave: #3a1714;
+      --aviso: #f0a63a; --aviso-suave: #3a2a10;
+      --sombra: 0 1px 2px rgba(0,0,0,.4);
+      --sombra-alta: 0 10px 30px rgba(0,0,0,.55);
+      --mapa-filtro: grayscale(.6) invert(.92) hue-rotate(180deg) brightness(.95) contrast(.9);
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    font: 14px/1.45 system-ui, -apple-system, &#34;Segoe UI&#34;, Roboto, &#34;Helvetica Neue&#34;, sans-serif;
+    background: var(--fondo); color: var(--texto);
+    -webkit-font-smoothing: antialiased;
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  button, select { font: inherit; color: inherit; }
+  svg.ic { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+
+  /* ---------- encabezado ---------- */
+  header {
+    position: sticky; top: 0; z-index: 1000;
+    display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+    padding: 12px 24px; padding-top: max(12px, env(safe-area-inset-top));
+    background: color-mix(in srgb, var(--superficie) 92%, transparent);
+    backdrop-filter: saturate(1.4) blur(8px);
+    border-bottom: 1px solid var(--borde);
+  }
+  .marca { display: flex; flex-direction: column; min-width: 0; }
+  .marca h1 { font-size: 17px; font-weight: 650; margin: 0; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .marca .sub { color: var(--suave); font-size: 12.5px; }
+  #selector select {
+    height: 36px; padding: 0 10px; background: var(--superficie); border: 1px solid var(--borde); border-radius: 8px;
+  }
+  .acciones { margin-left: auto; display: flex; align-items: center; gap: 8px; }
+  .estado {
+    display: inline-flex; align-items: center; gap: 7px; height: 30px; padding: 0 12px;
+    border-radius: 999px; background: var(--superficie-2); border: 1px solid var(--borde);
+    color: var(--suave); font-size: 12.5px; white-space: nowrap;
+  }
+  .estado .punto { width: 8px; height: 8px; border-radius: 50%; background: var(--tenue); }
+  .estado.vivo { color: var(--acento); background: var(--acento-suave); border-color: transparent; }
+  .estado.vivo .punto { background: var(--acento); animation: latido 2s infinite; }
+  .estado.error { color: var(--alerta); background: var(--alerta-suave); border-color: transparent; }
+  .estado.error .punto { background: var(--alerta); }
+  .boton {
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px; height: 36px; padding: 0 14px;
+    background: var(--superficie); border: 1px solid var(--borde); border-radius: 8px; cursor: pointer;
+    font-weight: 550; box-shadow: var(--sombra); transition: background .15s, border-color .15s;
+  }
+  .boton:hover { border-color: var(--tenue); }
+  .boton[aria-pressed=&#34;true&#34;] { background: var(--acento); border-color: var(--acento); color: #fff; }
+  .boton:disabled { opacity: .6; cursor: progress; }
+
+  /* ---------- contenido ---------- */
+  .contenedor { max-width: 1440px; margin: 0 auto; padding: 20px 24px 24px; }
+
+  .resumen { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 18px; }
+  .kpi {
+    background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio);
+    padding: 14px 16px; box-shadow: var(--sombra); display: flex; gap: 12px; align-items: center; min-width: 0;
+  }
+  .kpi .icono {
+    width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; flex: none;
+    background: var(--superficie-2); color: var(--suave);
+  }
+  .kpi.verde .icono { background: var(--acento-suave); color: var(--acento); }
+  .kpi.rojo .icono { background: var(--alerta-suave); color: var(--alerta); }
+  .kpi.ambar .icono { background: var(--aviso-suave); color: var(--aviso); }
+  .kpi .dato { min-width: 0; }
+  .kpi .etiqueta { color: var(--suave); font-size: 12.5px; }
+  .kpi .valor { font-size: 20px; font-weight: 650; letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .kpi .detalle { color: var(--tenue); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .cuerpo { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; height: calc(100vh - 210px); min-height: 460px; }
+  .tarjeta {
+    background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio);
+    box-shadow: var(--sombra); min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+  }
+  .tarjeta-cab {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 14px 16px; border-bottom: 1px solid var(--borde);
+  }
+  .tarjeta-cab h2 { font-size: 14px; font-weight: 650; margin: 0; }
+  .tarjeta-cab .nota { color: var(--tenue); font-size: 12.5px; }
+  #mapa { flex: 1; min-height: 300px; background: var(--superficie-2); }
+  #mapa .leaflet-tile-pane { filter: var(--mapa-filtro); }
+  .leaflet-popup-content { font: 13px/1.4 system-ui, sans-serif; margin: 10px 12px; }
+  .leaflet-popup-content strong { font-size: 13.5px; }
+
+  aside { display: flex; flex-direction: column; gap: 18px; min-height: 0; }
+  .pestanas { display: none; }
+  #sec-eventos { flex: 1; }
+  .lista { overflow-y: auto; flex: 1; padding: 6px 8px 10px; }
+  .dia {
+    position: sticky; top: 0; z-index: 1; padding: 10px 8px 6px; background: var(--superficie);
+    color: var(--tenue); font-size: 11.5px; font-weight: 650; text-transform: uppercase; letter-spacing: .06em;
+  }
+
+  .evento {
+    display: grid; grid-template-columns: 36px 1fr auto; gap: 12px; align-items: center;
+    padding: 10px 8px; border-radius: 10px; cursor: pointer; transition: background .15s;
+  }
+  .evento:hover { background: var(--superficie-2); }
+  .evento.nuevo { background: var(--alerta-suave); }
+  .evento .icono {
+    width: 36px; height: 36px; border-radius: 50%; display: grid; place-items: center;
+    background: var(--acento-suave); color: var(--acento);
+  }
+  .evento.sin-gps .icono { background: var(--superficie-2); color: var(--tenue); }
+  .evento.nuevo .icono { background: var(--alerta); color: #fff; }
+  .evento .titulo { font-weight: 600; }
+  .evento .meta { color: var(--suave); font-size: 12.5px; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 999px;
+    font-size: 11.5px; font-weight: 550; background: var(--superficie-2); color: var(--suave);
+  }
+  .chip.gris { color: var(--tenue); }
+  .chip.ambar { background: var(--aviso-suave); color: var(--aviso); }
+  .evento .derecha { text-align: right; display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+  .evento .hace { color: var(--tenue); font-size: 12px; white-space: nowrap; }
+  .intensidad { width: 64px; height: 5px; border-radius: 999px; background: var(--borde); overflow: hidden; }
+  .intensidad span { display: block; height: 100%; border-radius: inherit; background: var(--acento); }
+  .intensidad.media span { background: var(--aviso); }
+  .intensidad.alta span { background: var(--alerta); }
+
+  .equipo { display: flex; align-items: center; gap: 12px; padding: 10px 8px; border-radius: 10px; }
+  .equipo + .equipo { border-top: 1px solid var(--borde); border-radius: 0; }
+  .equipo .led { width: 10px; height: 10px; border-radius: 50%; background: var(--tenue); flex: none; box-shadow: 0 0 0 3px var(--superficie-2); }
+  .equipo .led.on { background: var(--acento); box-shadow: 0 0 0 3px var(--acento-suave); }
+  .equipo .nombre { font-weight: 600; }
+  .equipo .meta { color: var(--suave); font-size: 12.5px; }
+  #sec-equipos .lista { flex: none; max-height: 190px; }
+
+  .vacio { color: var(--tenue); text-align: center; padding: 28px 12px; }
+  .vacio svg.ic { width: 28px; height: 28px; display: block; margin: 0 auto 8px; opacity: .6; }
+
+  /* ---------- avisos ---------- */
+  #avisos {
+    position: fixed; z-index: 2000; top: 76px; right: 24px;
+    display: flex; flex-direction: column; gap: 10px; width: min(360px, calc(100% - 24px));
+    pointer-events: none;
+  }
+  .aviso {
+    pointer-events: auto; cursor: pointer; display: flex; gap: 12px; align-items: center;
+    background: var(--superficie); border: 1px solid var(--borde); border-radius: var(--radio);
+    box-shadow: var(--sombra-alta); padding: 12px 14px; animation: entrar .25s ease-out;
+  }
+  .aviso .icono { width: 34px; height: 34px; border-radius: 50%; display: grid; place-items: center; background: var(--alerta); color: #fff; flex: none; }
+  .aviso strong { display: block; font-size: 14px; }
+  .aviso span { color: var(--suave); font-size: 12.5px; }
+
+  .pulso { animation: pulso 1s ease-in-out infinite; }
+  @keyframes pulso { 0%,100% { stroke-width: 3; stroke-opacity: 1; } 50% { stroke-width: 14; stroke-opacity: .25; } }
+  @keyframes latido { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--acento) 55%, transparent); } 100% { box-shadow: 0 0 0 7px transparent; } }
+  @keyframes entrar { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: none; } }
+
+  /* ---------- pantallas medianas ---------- */
+  @media (max-width: 1100px) {
+    .resumen { grid-template-columns: repeat(2, 1fr); }
+    .cuerpo { height: calc(100vh - 290px); }
+  }
+
+  /* ---------- teléfono ---------- */
+  @media (max-width: 800px) {
+    header { padding: 10px 14px; padding-top: max(10px, env(safe-area-inset-top)); gap: 10px; }
+    .marca { flex: 1 1 auto; }
+    .marca h1 { font-size: 16px; }
+    .marca .sub { display: none; }
+    .acciones { margin-left: 0; gap: 6px; }
+    .boton .texto, .estado .texto-estado { display: none; }
+    .estado { width: 30px; padding: 0; justify-content: center; }
+    .boton { width: 40px; height: 40px; padding: 0; }
+    #selector { order: 5; width: 100%; }
+    #selector select { width: 100%; height: 40px; }
+
+    .contenedor { padding: 12px 12px 16px; }
+    .resumen { grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 12px; }
+    .kpi { padding: 10px 12px; gap: 10px; }
+    .kpi .icono { width: 32px; height: 32px; border-radius: 8px; }
+    .kpi .valor { font-size: 17px; }
+    .kpi .detalle { display: none; }
+
+    .cuerpo { display: block; height: auto; min-height: 0; }
+    .cuerpo &gt; .tarjeta:first-child { margin-bottom: 12px; }
+    .cuerpo &gt; .tarjeta:first-child .tarjeta-cab { display: none; }
+    #mapa { height: 31vh; height: 31dvh; min-height: 200px; flex: none; }
+    aside { gap: 0; }
+    .pestanas {
+      display: flex; gap: 4px; padding: 4px; margin-bottom: 10px; background: var(--superficie-2);
+      border: 1px solid var(--borde); border-radius: 10px; position: sticky; top: var(--alto-header, 60px); z-index: 900;
+    }
+    .pestanas button {
+      flex: 1; height: 38px; border: 0; border-radius: 8px; background: none; font-weight: 600; color: var(--suave); cursor: pointer;
+    }
+    .pestanas button[aria-selected=&#34;true&#34;] { background: var(--superficie); color: var(--texto); box-shadow: var(--sombra); }
+    aside .tarjeta-cab { display: none; }
+    aside:not([data-pestana=&#34;equipos&#34;]) #sec-equipos,
+    aside[data-pestana=&#34;equipos&#34;] #sec-eventos { display: none; }
+    .lista, #sec-equipos .lista { overflow: visible; max-height: none; }
+    .dia { position: static; padding-top: 12px; }
+    .evento { padding: 12px 8px; }
+    #avisos { top: auto; bottom: calc(14px + env(safe-area-inset-bottom)); right: 50%; transform: translateX(50%); }
+  }
+    </style>
+  </head>
+  <body>
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <symbol id="i-onda" viewBox="0 0 24 24">
+        <path d="M2 12h3l3-8 4 16 3-10 2 2h5">
+        </path>
+      </symbol>
+      <symbol id="i-reloj" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9">
+        </circle>
+        <path d="M12 7v5l3 2">
+        </path>
+      </symbol>
+      <symbol id="i-equipo" viewBox="0 0 24 24">
+        <rect x="4" y="4" width="16" height="16" rx="2">
+        </rect>
+        <path d="M9 9h6v6H9zM9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3">
+        </path>
+      </symbol>
+      <symbol id="i-gps" viewBox="0 0 24 24">
+        <path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z">
+        </path>
+        <circle cx="12" cy="9.5" r="2.5">
+        </circle>
+      </symbol>
+      <symbol id="i-campana" viewBox="0 0 24 24">
+        <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9">
+        </path>
+        <path d="M10.3 21a1.9 1.9 0 0 0 3.4 0">
+        </path>
+      </symbol>
+      <symbol id="i-campana-off" viewBox="0 0 24 24">
+        <path d="M8.7 3A6 6 0 0 1 18 8c0 2.7.4 4.6 1 6M17 17H3s3-2 3-9c0-.8.1-1.5.4-2.2M10.3 21a1.9 1.9 0 0 0 3.4 0M2 2l20 20">
+        </path>
+      </symbol>
+      <symbol id="i-descarga" viewBox="0 0 24 24">
+        <path d="M12 3v12M7 10l5 5 5-5M4 19h16">
+        </path>
+      </symbol>
+      <symbol id="i-vacio" viewBox="0 0 24 24">
+        <circle cx="12" cy="12" r="9">
+        </circle>
+        <path d="M8 15s1.5-2 4-2 4 2 4 2M9 9h.01M15 9h.01">
+        </path>
+      </symbol>
+    </svg>
+    <header id="cabecera">
+      <div class="marca">
+        <h1 id="titulo">
+          Monitoreo de eventos
+        </h1>
+        <span class="sub">        Detección en tiempo real
+</span>
+      </div>
+      <label id="selector">
+        <select id="proyecto" aria-label="Proyecto">
+        </select>
+      </label>
+      <div class="acciones">
+        <span class="estado" id="estado">        <span class="punto"></span>
+        <span class="texto-estado">        Conectando…
+</span>
+</span>
+        <button class="boton" id="btn-alertas" aria-pressed="false" title="Activar alertas en vivo">
+          <svg class="ic">
+            <use href="#i-campana-off">
+            </use>
+          </svg>
+          <span class="texto">          Alertas
+</span>
+        </button>
+        <button class="boton" id="btn-exportar" title="Descargar todos los eventos (CSV)">
+          <svg class="ic">
+            <use href="#i-descarga">
+            </use>
+          </svg>
+          <span class="texto">          Exportar
+</span>
+        </button>
+      </div>
+    </header>
+    <div id="avisos" aria-live="polite">
+    </div>
+    <div class="contenedor">
+      <section class="resumen" aria-label="Resumen">
+        <div class="kpi" id="kpi-hoy">
+          <div class="icono">
+            <svg class="ic">
+              <use href="#i-onda">
+              </use>
+            </svg>
+          </div>
+          <div class="dato">
+            <div class="etiqueta">
+              Eventos hoy
+            </div>
+            <div class="valor">
+              –
+            </div>
+            <div class="detalle">
+            </div>
+          </div>
+        </div>
+        <div class="kpi" id="kpi-ultimo">
+          <div class="icono">
+            <svg class="ic">
+              <use href="#i-reloj">
+              </use>
+            </svg>
+          </div>
+          <div class="dato">
+            <div class="etiqueta">
+              Último evento
+            </div>
+            <div class="valor">
+              –
+            </div>
+            <div class="detalle">
+            </div>
+          </div>
+        </div>
+        <div class="kpi" id="kpi-equipos">
+          <div class="icono">
+            <svg class="ic">
+              <use href="#i-equipo">
+              </use>
+            </svg>
+          </div>
+          <div class="dato">
+            <div class="etiqueta">
+              Equipos en línea
+            </div>
+            <div class="valor">
+              –
+            </div>
+            <div class="detalle">
+            </div>
+          </div>
+        </div>
+        <div class="kpi" id="kpi-gps">
+          <div class="icono">
+            <svg class="ic">
+              <use href="#i-gps">
+              </use>
+            </svg>
+          </div>
+          <div class="dato">
+            <div class="etiqueta">
+              Ubicación GPS
+            </div>
+            <div class="valor">
+              –
+            </div>
+            <div class="detalle">
+            </div>
+          </div>
+        </div>
+      </section>
+      <main class="cuerpo">
+        <section class="tarjeta">
+          <div class="tarjeta-cab">
+            <h2>
+              Mapa
+            </h2>
+            <span class="nota" id="nota-mapa"></span>
+          </div>
+          <div id="mapa">
+          </div>
+        </section>
+        <aside id="lateral">
+          <div class="pestanas" role="tablist">
+            <button role="tab" id="tab-eventos" aria-selected="true">
+              Eventos
+            </button>
+            <button role="tab" id="tab-equipos" aria-selected="false">
+              Equipos
+            </button>
+          </div>
+          <section class="tarjeta" id="sec-eventos">
+            <div class="tarjeta-cab">
+              <h2>
+                Eventos recientes
+              </h2>
+              <span class="nota" id="total"></span>
+            </div>
+            <div class="lista" id="eventos">
+            </div>
+          </section>
+          <section class="tarjeta" id="sec-equipos">
+            <div class="tarjeta-cab">
+              <h2>
+                Equipos
+              </h2>
+              <span class="nota" id="nota-equipos"></span>
+            </div>
+            <div class="lista" id="dispositivos">
+            </div>
+          </section>
+        </aside>
+      </main>
+    </div>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js">
+    </script>
+    <script>
+      const INTERVALO_MS = 5000;
+const MAX_EVENTOS = 500;
+const PULSO_MS = 60000;      // un evento nuevo se resalta durante 1 minuto
+const NIVEL_MAX = 4095;      // escala del ADC del ESP32 (para la barra de intensidad)
+const TITULO_BASE = document.title;
+
+// Modo cliente: /api/v1/ver#k=&lt;clave&gt; — solo ve el proyecto de su clave.
+// Modo administrador: panel (Cloudflare Access) o la red local.
+const CLAVE_CLIENTE = new URLSearchParams(location.hash.slice(1)).get(&#34;k&#34;);
+const RUTAS = CLAVE_CLIENTE
+  ? { proyectos: &#34;/api/v1/yo&#34;, base: (p) =&gt; `/api/v1/${p}` }
+  : { proyectos: &#34;panel/api/proyectos&#34;, base: (p) =&gt; `panel/api/${p}` };
+
+const $ = (id) =&gt; document.getElementById(id);
+const esTelefono = () =&gt; matchMedia(&#34;(max-width: 800px)&#34;).matches;
+
+function leerPreferencia(clave) { try { return localStorage.getItem(clave); } catch { return null; } }
+function guardarPreferencia(clave, valor) { try { localStorage.setItem(clave, valor); } catch {} }
+
+// ---------------------------------------------------------------- mapa
+
+const mapa = L.map(&#34;mapa&#34;, { zoomControl: !esTelefono() }).setView([-12.0464, -77.0428], 12);
+L.tileLayer(&#34;https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png&#34;, {
+  maxZoom: 19, attribution: &#34;&amp;copy; OpenStreetMap&#34;
+}).addTo(mapa);
+const capa = L.layerGroup().addTo(mapa);
+
+// ---------------------------------------------------------------- estado
+
+let proyecto = null;
+let cursor = 0;
+let eventos = [];
+let dispositivos = [];
+let centrado = false;
+let temporizador = null;
+let ocupado = false;
+let primeraCarga = true;       // lo que llega en la primera carga es historial: no alerta
+let noVistos = 0;
+let alertasActivas = leerPreferencia(&#34;alertas&#34;) === &#34;1&#34;;
+let audio = null;
+
+// ---------------------------------------------------------------- utilidades
+
+function el(etiqueta, clase, texto) {
+  const n = document.createElement(etiqueta);
+  if (clase) n.className = clase;
+  if (texto !== undefined) n.textContent = texto;
+  return n;
+}
+function icono(nombre) {
+  const svg = document.createElementNS(&#34;http://www.w3.org/2000/svg&#34;, &#34;svg&#34;);
+  svg.setAttribute(&#34;class&#34;, &#34;ic&#34;);
+  const use = document.createElementNS(&#34;http://www.w3.org/2000/svg&#34;, &#34;use&#34;);
+  use.setAttribute(&#34;href&#34;, &#34;#&#34; + nombre);
+  svg.append(use);
+  return svg;
+}
+const nombreTipo = (t) =&gt; { const s = t.replaceAll(&#34;_&#34;, &#34; &#34;); return s.charAt(0).toUpperCase() + s.slice(1); };
+const horaCorta = (iso) =&gt; new Date(iso).toLocaleTimeString([], { hour: &#34;2-digit&#34;, minute: &#34;2-digit&#34;, second: &#34;2-digit&#34; });
+const fechaHora = (iso) =&gt; iso ? new Date(iso).toLocaleString() : &#34;-&#34;;
+
+function hace(iso) {
+  if (!iso) return &#34;&#34;;
+  const s = Math.max(0, (Date.now() - new Date(iso)) / 1000);
+  if (s &lt; 60) return &#34;ahora&#34;;
+  if (s &lt; 3600) return `hace ${Math.floor(s / 60)} min`;
+  if (s &lt; 86400) return `hace ${Math.floor(s / 3600)} h`;
+  return `hace ${Math.floor(s / 86400)} d`;
+}
+
+function etiquetaDia(fecha) {
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const d = new Date(fecha); d.setHours(0, 0, 0, 0);
+  const dias = Math.round((hoy - d) / 86400000);
+  if (dias === 0) return &#34;Hoy&#34;;
+  if (dias === 1) return &#34;Ayer&#34;;
+  return d.toLocaleDateString([], { weekday: &#34;long&#34;, day: &#34;numeric&#34;, month: &#34;long&#34; });
+}
+
+async function pedir(ruta) {
+  const r = await fetch(ruta, CLAVE_CLIENTE
+    ? { headers: { &#34;X-Api-Key&#34;: CLAVE_CLIENTE }, cache: &#34;no-store&#34; }
+    : { credentials: &#34;same-origin&#34;, cache: &#34;no-store&#34; });
+  if (r.status === 401) throw new Error(&#34;enlace inválido o acceso revocado&#34;);
+  if (!r.ok) throw new Error(`${r.status} en ${ruta}`);
+  return r.json();
+}
+
+function ponerEstado(clase, texto) {
+  const e = $(&#34;estado&#34;);
+  e.className = &#34;estado &#34; + clase;
+  e.querySelector(&#34;.texto-estado&#34;).textContent = texto;
+  e.title = texto;
+}
+
+function ponerKpi(id, valor, detalle, color) {
+  const k = $(id);
+  k.className = &#34;kpi&#34; + (color ? &#34; &#34; + color : &#34;&#34;);
+  k.querySelector(&#34;.valor&#34;).textContent = valor;
+  k.querySelector(&#34;.detalle&#34;).textContent = detalle || &#34; &#34;;
+}
+
+// ---------------------------------------------------------------- alertas en vivo
+
+function actualizarBotonAlertas() {
+  const b = $(&#34;btn-alertas&#34;);
+  b.setAttribute(&#34;aria-pressed&#34;, String(alertasActivas));
+  b.title = alertasActivas ? &#34;Alertas activadas (clic para silenciar)&#34; : &#34;Activar alertas en vivo&#34;;
+  b.querySelector(&#34;use&#34;).setAttribute(&#34;href&#34;, alertasActivas ? &#34;#i-campana&#34; : &#34;#i-campana-off&#34;);
+}
+
+async function alternarAlertas() {
+  alertasActivas = !alertasActivas;
+  guardarPreferencia(&#34;alertas&#34;, alertasActivas ? &#34;1&#34; : &#34;0&#34;);
+  actualizarBotonAlertas();
+  if (!alertasActivas) return;
+  prepararAudio();
+  sonar();  // confirma que el sonido funciona
+  if (&#34;Notification&#34; in window &amp;&amp; Notification.permission === &#34;default&#34;) {
+    try { await Notification.requestPermission(); } catch {}
+  }
+}
+
+function prepararAudio() {
+  // El navegador solo permite sonido después de un toque del usuario.
+  try {
+    audio = audio || new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state === &#34;suspended&#34;) audio.resume();
+  } catch { audio = null; }
+}
+
+function sonar() {
+  if (!audio) return;
+  const t = audio.currentTime;
+  [[880, 0], [660, 0.18]].forEach(([frecuencia, inicio]) =&gt; {
+    const osc = audio.createOscillator();
+    const vol = audio.createGain();
+    osc.frequency.value = frecuencia;
+    vol.gain.setValueAtTime(0.0001, t + inicio);
+    vol.gain.exponentialRampToValueAtTime(0.3, t + inicio + 0.02);
+    vol.gain.exponentialRampToValueAtTime(0.0001, t + inicio + 0.16);
+    osc.connect(vol).connect(audio.destination);
+    osc.start(t + inicio);
+    osc.stop(t + inicio + 0.17);
+  });
+}
+
+function mostrarAviso(ev) {
+  const aviso = el(&#34;div&#34;, &#34;aviso&#34;);
+  const ic = el(&#34;div&#34;, &#34;icono&#34;);
+  ic.append(icono(&#34;i-onda&#34;));
+  const texto = el(&#34;div&#34;);
+  texto.append(el(&#34;strong&#34;, null, nombreTipo(ev.tipo)),
+               el(&#34;span&#34;, null, `${ev.device_id} · ${horaCorta(ev.ts)}` + (ev.lat === null ? &#34; · sin ubicación&#34; : &#34;&#34;)));
+  aviso.append(ic, texto);
+  aviso.addEventListener(&#34;click&#34;, () =&gt; { enfocar(ev); aviso.remove(); });
+  $(&#34;avisos&#34;).prepend(aviso);
+  while ($(&#34;avisos&#34;).children.length &gt; 3) $(&#34;avisos&#34;).lastChild.remove();
+  setTimeout(() =&gt; aviso.remove(), 8000);
+}
+
+function notificarSistema(ev) {
+  if (!(&#34;Notification&#34; in window) || Notification.permission !== &#34;granted&#34; || !document.hidden) return;
+  try {
+    const n = new Notification(nombreTipo(ev.tipo), {
+      body: `${ev.device_id} · ${horaCorta(ev.ts)}`, tag: ev.event_id
+    });
+    n.onclick = () =&gt; { window.focus(); enfocar(ev); n.close(); };
+  } catch {}  // en Android Chrome requiere service worker: ahí queda la vibración
+}
+
+function alertar(nuevos) {
+  noVistos += nuevos.length;
+  if (document.hidden) document.title = `(${noVistos}) ${TITULO_BASE}`;
+  const ahora = Date.now();
+  nuevos.forEach((ev) =&gt; { ev._nuevoHasta = ahora + PULSO_MS; });
+  if (!alertasActivas) return;
+  nuevos.slice(-3).forEach(mostrarAviso);
+  sonar();
+  if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+  nuevos.slice(-3).forEach(notificarSistema);
+}
+
+document.addEventListener(&#34;visibilitychange&#34;, () =&gt; {
+  if (!document.hidden) { noVistos = 0; document.title = TITULO_BASE; }
+});
+
+// ---------------------------------------------------------------- exportar
+
+function celda(v) {
+  const s = v === null || v === undefined ? &#34;&#34; : String(v);
+  return /[&#34;;\n\r]/.test(s) ? `&#34;${s.replaceAll(&#39;&#34;&#39;, &#39;&#34;&#34;&#39;)}&#34;` : s;
+}
+
+async function exportar() {
+  const boton = $(&#34;btn-exportar&#34;);
+  boton.disabled = true;
+  try {
+    const todos = [];
+    let desde = 0;
+    for (;;) {  // descarga TODO el historial, de a 500
+      const pag = await pedir(`${RUTAS.base(proyecto)}/eventos?desde=${desde}&amp;limite=500`);
+      todos.push(...pag.eventos);
+      if (pag.eventos.length &lt; 500) break;
+      desde = pag.cursor;
+    }
+    const columnas = [&#34;fecha_local&#34;, &#34;fecha_utc&#34;, &#34;equipo&#34;, &#34;tipo&#34;, &#34;latitud&#34;, &#34;longitud&#34;, &#34;fix_gps&#34;,
+                      &#34;nivel&#34;, &#34;satelites&#34;, &#34;id_evento&#34;, &#34;otros_datos&#34;];
+    const filas = todos.map((e) =&gt; {
+      const { nivel, sats, ...otros } = e.datos || {};
+      return [new Date(e.ts).toLocaleString(), e.ts, e.device_id, nombreTipo(e.tipo), e.lat, e.lon,
+              e.fix ? &#34;sí&#34; : &#34;no&#34;, nivel, sats, e.event_id,
+              Object.keys(otros).length ? JSON.stringify(otros) : &#34;&#34;];
+    });
+    // &#34;;&#34; y BOM para que Excel en español lo abra con columnas y tildes correctas.
+    const csv = &#34;﻿&#34; + [columnas, ...filas].map((f) =&gt; f.map(celda).join(&#34;;&#34;)).join(&#34;\r\n&#34;);
+    const url = URL.createObjectURL(new Blob([csv], { type: &#34;text/csv;charset=utf-8&#34; }));
+    const a = el(&#34;a&#34;);
+    a.href = url;
+    a.download = `eventos-${proyecto}-${new Date().toISOString().slice(0, 10)}.csv`;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() =&gt; URL.revokeObjectURL(url), 5000);
+  } catch (e) {
+    alert(&#34;No se pudo exportar: &#34; + e.message);
+  } finally {
+    boton.disabled = false;
+  }
+}
+
+// ---------------------------------------------------------------- dibujo
+
+function enfocar(ev) {
+  if (ev.lat === null) return;
+  if (esTelefono()) window.scrollTo({ top: 0, behavior: &#34;smooth&#34; });
+  mapa.setView([ev.lat, ev.lon], 17);
+  if (ev._marcador) ev._marcador.openPopup();
+}
+
+function vacio(texto) {
+  const v = el(&#34;div&#34;, &#34;vacio&#34;);
+  v.append(icono(&#34;i-vacio&#34;), texto);
+  return v;
+}
+
+function dibujarResumen() {
+  const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+  const deHoy = eventos.filter((e) =&gt; new Date(e.ts) &gt;= hoy);
+  const ultimaHora = deHoy.filter((e) =&gt; Date.now() - new Date(e.ts) &lt; 3600000).length;
+  ponerKpi(&#34;kpi-hoy&#34;, String(deHoy.length),
+           deHoy.length ? `${ultimaHora} en la última hora` : &#34;Sin eventos hoy&#34;, deHoy.length ? &#34;rojo&#34; : &#34;&#34;);
+
+  const ultimo = eventos[eventos.length - 1];
+  ponerKpi(&#34;kpi-ultimo&#34;, ultimo ? hace(ultimo.ts) : &#34;Ninguno&#34;,
+           ultimo ? `${ultimo.device_id} · ${horaCorta(ultimo.ts)}` : &#34;Aún no hay eventos&#34;);
+
+  const enLinea = dispositivos.filter((d) =&gt; d.en_linea).length;
+  ponerKpi(&#34;kpi-equipos&#34;, dispositivos.length ? `${enLinea} de ${dispositivos.length}` : &#34;–&#34;,
+           !dispositivos.length ? &#34;Sin equipos&#34; : enLinea === dispositivos.length ? &#34;Todos conectados&#34; : `${dispositivos.length - enLinea} sin conexión`,
+           !dispositivos.length ? &#34;&#34; : enLinea === dispositivos.length ? &#34;verde&#34; : &#34;ambar&#34;);
+
+  const activos = dispositivos.filter((d) =&gt; d.en_linea);
+  const conFix = activos.filter((d) =&gt; d.estado &amp;&amp; d.estado.fix === true).length;
+  if (!activos.length) {
+    ponerKpi(&#34;kpi-gps&#34;, &#34;–&#34;, &#34;Sin equipos en línea&#34;);
+  } else if (conFix === activos.length) {
+    ponerKpi(&#34;kpi-gps&#34;, &#34;Con posición&#34;, `${conFix} de ${activos.length} equipos`, &#34;verde&#34;);
+  } else {
+    const vista = Math.max(0, ...activos.map((d) =&gt; (d.estado &amp;&amp; d.estado.sats_vista) || 0));
+    ponerKpi(&#34;kpi-gps&#34;, &#34;Buscando&#34;, `${conFix} de ${activos.length} con posición · ${vista} satélites a la vista`, &#34;ambar&#34;);
+  }
+}
+
+function dibujarDispositivos() {
+  const cont = $(&#34;dispositivos&#34;);
+  cont.replaceChildren();
+  const enLinea = dispositivos.filter((d) =&gt; d.en_linea).length;
+  $(&#34;tab-equipos&#34;).textContent = `Equipos (${enLinea}/${dispositivos.length})`;
+  $(&#34;nota-equipos&#34;).textContent = dispositivos.length ? `${enLinea} en línea` : &#34;&#34;;
+  if (!dispositivos.length) { cont.append(vacio(&#34;Sin equipos registrados&#34;)); return; }
+  for (const d of dispositivos) {
+    const fila = el(&#34;div&#34;, &#34;equipo&#34;);
+    const info = el(&#34;div&#34;);
+    const e = d.estado || {};
+    const partes = [d.en_linea ? &#34;En línea&#34; : &#34;Sin conexión&#34;];
+    if (d.ultimo_latido) partes.push(&#34;visto &#34; + hace(d.ultimo_latido));
+    if (e.fix === true) partes.push(&#34;GPS con posición&#34;);
+    else if (e.sats_vista !== undefined) partes.push(`GPS buscando (${e.sats_vista} sat.)`);
+    if (e.rssi !== undefined) partes.push(`WiFi ${e.rssi} dBm`);
+    if (e.pendientes) partes.push(`${e.pendientes} en cola`);
+    info.append(el(&#34;div&#34;, &#34;nombre&#34;, d.device_id), el(&#34;div&#34;, &#34;meta&#34;, partes.join(&#34; · &#34;)));
+    fila.append(el(&#34;span&#34;, &#34;led&#34; + (d.en_linea ? &#34; on&#34; : &#34;&#34;)), info);
+    cont.append(fila);
+  }
+}
+
+function barraIntensidad(nivel) {
+  const b = el(&#34;div&#34;, &#34;intensidad&#34;);
+  const p = Math.max(4, Math.min(100, (nivel / NIVEL_MAX) * 100));
+  if (p &gt; 66) b.classList.add(&#34;alta&#34;); else if (p &gt; 40) b.classList.add(&#34;media&#34;);
+  const s = el(&#34;span&#34;);
+  s.style.width = p + &#34;%&#34;;
+  b.append(s);
+  b.title = `Nivel ${nivel}`;
+  return b;
+}
+
+function dibujarEventos() {
+  const cont = $(&#34;eventos&#34;);
+  cont.replaceChildren();
+  capa.clearLayers();
+  $(&#34;total&#34;).textContent = eventos.length ? `${eventos.length} mostrados` : &#34;&#34;;
+  const conUbicacion = eventos.filter((e) =&gt; e.lat !== null).length;
+  $(&#34;nota-mapa&#34;).textContent = eventos.length ? `${conUbicacion} de ${eventos.length} con ubicación` : &#34;&#34;;
+  if (!eventos.length) { cont.append(vacio(&#34;Sin eventos todavía&#34;)); return; }
+
+  const ahora = Date.now();
+  let diaActual = null;
+  for (const ev of [...eventos].reverse()) {
+    const dia = etiquetaDia(ev.ts);
+    if (dia !== diaActual) { cont.append(el(&#34;div&#34;, &#34;dia&#34;, dia)); diaActual = dia; }
+
+    const nuevo = ev._nuevoHasta &amp;&amp; ahora &lt; ev._nuevoHasta;
+    const fila = el(&#34;div&#34;, &#34;evento&#34; + (nuevo ? &#34; nuevo&#34; : &#34;&#34;) + (ev.lat === null ? &#34; sin-gps&#34; : &#34;&#34;));
+    const ic = el(&#34;div&#34;, &#34;icono&#34;);
+    ic.append(icono(&#34;i-onda&#34;));
+
+    const centro = el(&#34;div&#34;);
+    const meta = el(&#34;div&#34;, &#34;meta&#34;);
+    meta.append(el(&#34;span&#34;, null, ev.device_id), el(&#34;span&#34;, null, horaCorta(ev.ts)));
+    if (ev.lat === null) meta.append(el(&#34;span&#34;, &#34;chip gris&#34;, &#34;Sin ubicación&#34;));
+    else if (!ev.fix) meta.append(el(&#34;span&#34;, &#34;chip ambar&#34;, &#34;Última posición conocida&#34;));
+    centro.append(el(&#34;div&#34;, &#34;titulo&#34;, nombreTipo(ev.tipo)), meta);
+
+    const der = el(&#34;div&#34;, &#34;derecha&#34;);
+    der.append(el(&#34;span&#34;, &#34;hace&#34;, hace(ev.ts)));
+    if (ev.datos &amp;&amp; typeof ev.datos.nivel === &#34;number&#34;) der.append(barraIntensidad(ev.datos.nivel));
+
+    fila.append(ic, centro, der);
+    fila.addEventListener(&#34;click&#34;, () =&gt; enfocar(ev));
+    cont.append(fila);
+
+    if (ev.lat !== null) {
+      const color = nuevo ? &#34;#c2362b&#34; : (ev.fix ? &#34;#1a7f55&#34; : &#34;#b26a00&#34;);
+      const m = L.circleMarker([ev.lat, ev.lon], {
+        radius: nuevo ? 10 : 7, color: &#34;#fff&#34;, weight: 2, fillColor: color, fillOpacity: .95,
+        className: nuevo ? &#34;pulso&#34; : &#34;&#34;
+      });
+      const popup = el(&#34;div&#34;);
+      popup.append(el(&#34;strong&#34;, null, nombreTipo(ev.tipo)), el(&#34;br&#34;), ev.device_id, el(&#34;br&#34;), fechaHora(ev.ts));
+      m.bindPopup(popup).addTo(capa);
+      ev._marcador = m;
+    }
+  }
+  const ultimo = [...eventos].reverse().find((e) =&gt; e.lat !== null);
+  if (ultimo &amp;&amp; !centrado) { mapa.setView([ultimo.lat, ultimo.lon], 15); centrado = true; }
+}
+
+function dibujarTodo() {
+  dibujarEventos();
+  dibujarDispositivos();
+  dibujarResumen();
+}
+
+// ---------------------------------------------------------------- ciclo
+
+async function actualizar() {
+  if (ocupado) return;
+  ocupado = true;
+  const pedido = proyecto;
+  let hayMas = false;
+  try {
+    const [pag, disp] = await Promise.all([
+      pedir(`${RUTAS.base(proyecto)}/eventos?desde=${cursor}&amp;limite=500`),
+      pedir(`${RUTAS.base(proyecto)}/dispositivos`)
+    ]);
+    if (pedido !== proyecto) return;
+    if (pag.eventos.length) {
+      if (!primeraCarga) alertar(pag.eventos);
+      eventos = eventos.concat(pag.eventos).slice(-MAX_EVENTOS);
+      cursor = pag.cursor;
+      hayMas = pag.eventos.length === 500;
+    }
+    if (!hayMas) primeraCarga = false;
+    dispositivos = disp.dispositivos;
+    dibujarTodo();
+    ponerEstado(&#34;vivo&#34;, &#34;En vivo · &#34; + new Date().toLocaleTimeString([], { hour: &#34;2-digit&#34;, minute: &#34;2-digit&#34; }));
+  } catch (e) {
+    ponerEstado(&#34;error&#34;, &#34;Error: &#34; + e.message);
+  } finally {
+    ocupado = false;
+  }
+  if (hayMas) actualizar();
+}
+
+function cambiarProyecto(nombre) {
+  proyecto = nombre;
+  ocupado = false;
+  cursor = 0;
+  eventos = [];
+  dispositivos = [];
+  centrado = false;
+  primeraCarga = true;
+  dibujarTodo();
+  clearInterval(temporizador);
+  actualizar();
+  temporizador = setInterval(actualizar, INTERVALO_MS);
+}
+
+function elegirPestana(nombre) {
+  $(&#34;lateral&#34;).dataset.pestana = nombre;
+  $(&#34;tab-eventos&#34;).setAttribute(&#34;aria-selected&#34;, String(nombre === &#34;eventos&#34;));
+  $(&#34;tab-equipos&#34;).setAttribute(&#34;aria-selected&#34;, String(nombre === &#34;equipos&#34;));
+}
+
+function ajustarAltoCabecera() {
+  document.documentElement.style.setProperty(&#34;--alto-header&#34;, $(&#34;cabecera&#34;).offsetHeight + &#34;px&#34;);
+  mapa.invalidateSize();
+}
+
+// ---------------------------------------------------------------- inicio
+
+$(&#34;btn-alertas&#34;).addEventListener(&#34;click&#34;, alternarAlertas);
+$(&#34;btn-exportar&#34;).addEventListener(&#34;click&#34;, exportar);
+$(&#34;tab-eventos&#34;).addEventListener(&#34;click&#34;, () =&gt; elegirPestana(&#34;eventos&#34;));
+$(&#34;tab-equipos&#34;).addEventListener(&#34;click&#34;, () =&gt; elegirPestana(&#34;equipos&#34;));
+window.addEventListener(&#34;resize&#34;, ajustarAltoCabecera);
+// Si las alertas quedaron activadas de una visita anterior, el audio se habilita con el primer toque.
+document.addEventListener(&#34;pointerdown&#34;, () =&gt; { if (alertasActivas) prepararAudio(); }, { once: true });
+actualizarBotonAlertas();
+elegirPestana(&#34;eventos&#34;);
+
+(async () =&gt; {
+  try {
+    const { proyectos } = await pedir(RUTAS.proyectos);
+    const sel = $(&#34;proyecto&#34;);
+    for (const p of proyectos) sel.append(new Option(p, p));
+    sel.addEventListener(&#34;change&#34;, () =&gt; cambiarProyecto(sel.value));
+    if (proyectos.length === 1) {
+      $(&#34;selector&#34;).hidden = true;
+      $(&#34;titulo&#34;).textContent = `Monitoreo de eventos · ${proyectos[0].toUpperCase()}`;
+    }
+    ajustarAltoCabecera();
+    if (proyectos.length) cambiarProyecto(proyectos[0]);
+  } catch (e) {
+    ponerEstado(&#34;error&#34;, &#34;Error: &#34; + e.message);
+  }
+})();
+// Refresca los &#34;hace X min&#34; y el resumen aunque no lleguen datos nuevos.
+setInterval(() =&gt; { if (proyecto) dibujarTodo(); }, 30000);
+    </script>
+  </body>
+</html>
