@@ -442,10 +442,12 @@ const TITULO_BASE = document.title;
 
 // Modo cliente: /api/v1/ver#k=&lt;clave&gt; — solo ve el proyecto de su clave.
 // Modo administrador: panel (Cloudflare Access) o la red local.
-const CLAVE_CLIENTE = new URLSearchParams(location.hash.slice(1)).get(&#34;k&#34;);
-const RUTAS = CLAVE_CLIENTE
-  ? { proyectos: &#34;/api/v1/yo&#34;, base: (p) =&gt; `/api/v1/${p}` }
-  : { proyectos: &#34;panel/api/proyectos&#34;, base: (p) =&gt; `panel/api/${p}` };
+const CLAVE_CLIENTE = "gU9C0RGL4dN_-HKgZyXUgIFbANBi3jqhQJccefAYfSw";
+const PROXY = "https://corsproxy.io/?";
+const RUTAS = { 
+  proyectos: PROXY + encodeURIComponent("https://api.atlinova.com/api/v1/yo"), 
+  base: (p) => PROXY + encodeURIComponent(`https://api.atlinova.com/api/v1/${p}`) 
+};
 
 const $ = (id) =&gt; document.getElementById(id);
 const esTelefono = () =&gt; matchMedia(&#34;(max-width: 800px)&#34;).matches;
